@@ -14,3 +14,143 @@ phenotype = pd.read_csv("rat_body_weight_phenotype.csv")
 # phenotype = pd.read_csv("rat_blood_glucose_phenotype.csv")
 
 
+
+# NEW SEET OF CODE=========================
+# 1. Imports
+# =========================
+import pandas as pd
+import numpy as np
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+
+
+# =========================
+# 2. Load phenotype files (SEPARATE)
+# =========================
+bw = pd.read_csv("/mnt/data/strainmeans_bw.csv")
+bg = pd.read_csv("/mnt/data/strainmeans_blood_glucose.csv")
+
+print("Body weight columns:", bw.columns)
+print("Blood glucose columns:", bg.columns)
+
+
+# =========================
+# 3. Select features
+# (CHANGE column names if needed)
+# =========================
+
+# Body weight features
+X_bw = bw[[
+    "body_weight_mean"   # <-- adjust if column name differs
+]]
+
+# Blood glucose features
+X_bg = bg[[
+    "blood_glucose_mean"  # <-- adjust if column name differs
+]]
+
+# Target: offspring genetics
+# (must exist in at least one file, usually bw)
+y = bw["offspring_genotype"]   # <-- REPLACE if different
+
+
+# =========================
+# 4. Train / Test split (shared indices)
+# =========================
+indices = np.arange(len(y))
+
+train_idx, test_idx = train_test_split(
+    indices,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+X_bw_train = X_bw.iloc[train_idx]
+X_bw_test  = X_bw.iloc[test_idx]
+
+X_bg_train = X_bg.iloc[train_idx]
+X_bg_test  = X_bg.iloc[test_idx]
+
+y_train = y.iloc[train_idx]
+y_test  = y.iloc[test_idx]
+
+
+# =========================
+# 5. Scale each phenotype separately
+# =========================
+scaler_bw = StandardScaler()
+scaler_bg = StandardScaler()
+
+X_bw_train = scaler_bw.fit_transform(X_bw_train)
+X_bw_test  = scaler_bw.transform(X_bw_test)
+
+X_bg_train = scaler_bg.fit_transform(X_bg_train)
+X_bg_test  = scaler_bg.transform(X_bg_test)
+
+
+# =========================
+# 6. Combine ONLY at model input
+# =========================
+X_train = np.hstack([X_bw_train, X_bg_train])
+X_test  = np.hstack([X_bw_test, X_bg_test])
+
+
+# =========================
+# 7. Train ML model
+# =========================
+model = RandomForestClassifier(
+    n_estimators=300,
+    random_state=42,
+    class_weight="balanced"
+)
+
+model.fit(X_train, y_train)
+
+
+# =========================
+# 8. Evaluate model
+# =========================
+y_pred = model.predict(X_test)
+
+print("\nAccuracy:", accuracy_score(y_test, y_pred))
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+
+
+# =========================
+# 9. Feature importance
+# =========================
+feature_names = [
+    "body_weight_mean",
+    "blood_glucose_mean"
+]
+
+importances = pd.Series(
+    model.feature_importances_,
+    index=feature_names
+).sort_values(ascending=False)
+
+print("\nFeature Importance:")
+print(importances)
+
+
+# =========================
+# 10. Predict offspring genetics for NEW samples
+# =========================
+# Example new parental phenotypes
+new_bw = [[28.5]]
+new_bg = [[135.0]]
+
+new_bw = scaler_bw.transform(new_bw)
+new_bg = scaler_bg.transform(new_bg)
+
+X_new = np.hstack([new_bw, new_bg])
+
+prediction = model.predict(X_new)
+
+print("\nPredicted offspring genotype:", prediction[0])
+
+
