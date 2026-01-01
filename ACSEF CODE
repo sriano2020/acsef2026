@@ -1,3 +1,5 @@
+trainmeans_bw.csv")
+# bg = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_blood_glucose.csv")
 # =========================================================
 # Predict genetic strain from phenotype data (NO MERGING)
 # Body weight + Blood glucose → genetic strain
@@ -56,10 +58,16 @@ print("Blood glucose features:", bg.columns.tolist())
 
 
 # =========================
-# STEP 4: Train / test split
+# STEP 4: Train / test split (aligned indices)
 # =========================
 
-indices = np.arange(len(y))
+# Use only rows that exist in BOTH datasets
+n = min(len(bw), len(bg), len(y))
+indices = np.arange(n)
+
+X_bw = bw.iloc[:n].reset_index(drop=True)
+X_bg = bg.iloc[:n].reset_index(drop=True)
+y    = y.iloc[:n].reset_index(drop=True)
 
 train_idx, test_idx = train_test_split(
     indices,
@@ -67,14 +75,15 @@ train_idx, test_idx = train_test_split(
     random_state=42
 )
 
-X_bw_train = bw.iloc[train_idx]
-X_bw_test  = bw.iloc[test_idx]
+X_bw_train = X_bw.iloc[train_idx]
+X_bw_test  = X_bw.iloc[test_idx]
 
-X_bg_train = bg.iloc[train_idx]
-X_bg_test  = bg.iloc[test_idx]
+X_bg_train = X_bg.iloc[train_idx]
+X_bg_test  = X_bg.iloc[test_idx]
 
 y_train = y.iloc[train_idx]
 y_test  = y.iloc[test_idx]
+
 
 # =========================================================
 # STEP 5: Scale each phenotype separately
@@ -138,14 +147,15 @@ print("\nTop Feature Importances:")
 print(importances.head(10))
 
 
-# =========================================================
-# STEP 10: Predict strain for new phenotype data
-# =========================================================
+# =========================
+# STEP 10: Predict strain for new phenotype data (SAFE)
+# =========================
+
 print("\nPredicting strain for new sample...")
 
-# Example new parent phenotypes
-new_bw = np.array([[28.5]])     # body weight
-new_bg = np.array([[135.0]])    # blood glucose
+# Create a new sample using dataset feature means
+new_bw = pd.DataFrame([X_bw.mean()], columns=X_bw.columns)
+new_bg = pd.DataFrame([X_bg.mean()], columns=X_bg.columns)
 
 new_bw_scaled = scaler_bw.transform(new_bw)
 new_bg_scaled = scaler_bg.transform(new_bg)
