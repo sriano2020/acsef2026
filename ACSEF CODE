@@ -1,6 +1,10 @@
-# NEW SEET OF CODE=========================
-# 1. Imports
-# =========================
+# bw = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_bw.csv")
+# bg = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_blood_glucose.csv")
+# =========================================================
+# Predict genetic strain from phenotype data (NO MERGING)
+# Body weight + Blood glucose → genetic strain
+# =========================================================
+
 import pandas as pd
 import numpy as np
 
@@ -10,61 +14,75 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 
 
+# =========================================================
+# STEP 1: Load data
+# =========================================================
+print("Loading datasets...")
+
+bw = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_bw.csv")
+bg = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_blood_glucose.csv")
+
+print("Body weight columns:")
+print(bw.columns.tolist())
+
+print("\nBlood glucose columns:")
+print(bg.columns.tolist())
+
+
+# =========================================================
+# STEP 2: Confirm strain column exists
+# =========================================================
+if "strain" not in bw.columns:
+    raise ValueError("ERROR: 'strain' column not found in body weight file.")
+
+y = bw["strain"]
+print("\nUsing genetics target: strain")
+
+
+# =========================================================
+# STEP 3: Select numeric phenotype features
+# =========================================================
+print("\nSelecting numeric phenotype features...")
+
+bw = bw.select_dtypes(include=np.number)
+bg = bg.select_dtypes(include=np.number)
+
+if bw.empty:
+    raise ValueError("ERROR: No numeric body weight features found.")
+
+if bg.empty:
+    raise ValueError("ERROR: No numeric blood glucose features found.")
+
+print("Body weight features:", bw.columns.tolist())
+print("Blood glucose features:", bg.columns.tolist())
+
+
 # =========================
-# 2. Load phenotype files (SEPARATE)
-# =========================
-bw = pd.read_csv("/mnt/data/strainmeans_bw.csv")
-bg = pd.read_csv("/mnt/data/strainmeans_blood_glucose.csv")
-
-print("Body weight columns:", bw.columns)
-print("Blood glucose columns:", bg.columns)
-
-
-# =========================
-# 3. Select features
-# (CHANGE column names if needed)
+# STEP 4: Train / test split
 # =========================
 
-# Body weight features
-X_bw = bw[[
-    "body_weight_mean"   # <-- adjust if column name differs
-]]
-
-# Blood glucose features
-X_bg = bg[[
-    "blood_glucose_mean"  # <-- adjust if column name differs
-]]
-
-# Target: offspring genetics
-# (must exist in at least one file, usually bw)
-y = bw["offspring_genotype"]   # <-- REPLACE if different
-
-
-# =========================
-# 4. Train / Test split (shared indices)
-# =========================
 indices = np.arange(len(y))
 
 train_idx, test_idx = train_test_split(
     indices,
     test_size=0.2,
-    random_state=42,
-    stratify=y
+    random_state=42
 )
 
-X_bw_train = X_bw.iloc[train_idx]
-X_bw_test  = X_bw.iloc[test_idx]
+X_bw_train = bw.iloc[train_idx]
+X_bw_test  = bw.iloc[test_idx]
 
-X_bg_train = X_bg.iloc[train_idx]
-X_bg_test  = X_bg.iloc[test_idx]
+X_bg_train = bg.iloc[train_idx]
+X_bg_test  = bg.iloc[test_idx]
 
 y_train = y.iloc[train_idx]
 y_test  = y.iloc[test_idx]
 
+# =========================================================
+# STEP 5: Scale each phenotype separately
+# =========================================================
+print("\nScaling features...")
 
-# =========================
-# 5. Scale each phenotype separately
-# =========================
 scaler_bw = StandardScaler()
 scaler_bg = StandardScaler()
 
@@ -75,16 +93,18 @@ X_bg_train = scaler_bg.fit_transform(X_bg_train)
 X_bg_test  = scaler_bg.transform(X_bg_test)
 
 
-# =========================
-# 6. Combine ONLY at model input
-# =========================
+# =========================================================
+# STEP 6: Combine ONLY at model input
+# =========================================================
 X_train = np.hstack([X_bw_train, X_bg_train])
 X_test  = np.hstack([X_bw_test, X_bg_test])
 
 
-# =========================
-# 7. Train ML model
-# =========================
+# =========================================================
+# STEP 7: Train Random Forest model
+# =========================================================
+print("\nTraining model...")
+
 model = RandomForestClassifier(
     n_estimators=300,
     random_state=42,
@@ -94,46 +114,48 @@ model = RandomForestClassifier(
 model.fit(X_train, y_train)
 
 
-# =========================
-# 8. Evaluate model
-# =========================
+# =========================================================
+# STEP 8: Evaluate model
+# =========================================================
+print("\nEvaluating model...")
+
 y_pred = model.predict(X_test)
 
 print("\nAccuracy:", accuracy_score(y_test, y_pred))
-print("\nClassification Report:\n", classification_report(y_test, y_pred))
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
 
 
-# =========================
-# 9. Feature importance
-# =========================
-feature_names = [
-    "body_weight_mean",
-    "blood_glucose_mean"
-]
+# =========================================================
+# STEP 9: Feature importance
+# =========================================================
+feature_names = list(bw.columns) + list(bg.columns)
 
 importances = pd.Series(
     model.feature_importances_,
     index=feature_names
 ).sort_values(ascending=False)
 
-print("\nFeature Importance:")
-print(importances)
+print("\nTop Feature Importances:")
+print(importances.head(10))
 
 
-# =========================
-# 10. Predict offspring genetics for NEW samples
-# =========================
-# Example new parental phenotypes
-new_bw = [[28.5]]
-new_bg = [[135.0]]
+# =========================================================
+# STEP 10: Predict strain for new phenotype data
+# =========================================================
+print("\nPredicting strain for new sample...")
 
-new_bw = scaler_bw.transform(new_bw)
-new_bg = scaler_bg.transform(new_bg)
+# Example new parent phenotypes
+new_bw = np.array([[28.5]])     # body weight
+new_bg = np.array([[135.0]])    # blood glucose
 
-X_new = np.hstack([new_bw, new_bg])
+new_bw_scaled = scaler_bw.transform(new_bw)
+new_bg_scaled = scaler_bg.transform(new_bg)
+
+X_new = np.hstack([new_bw_scaled, new_bg_scaled])
 
 prediction = model.predict(X_new)
 
-print("\nPredicted offspring genotype:", prediction[0])
+print("Predicted genetic strain:", prediction[0])
 
-
+print("\nPIPELINE FINISHED SUCCESSFULLY ✅")
