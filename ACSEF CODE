@@ -1,1 +1,16 @@
+import pandas as pd
+import numpy as np
+
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.dummy import DummyRegressor
+
+# Load genotype features
+X_genotype = pd.read_csv("rat_genotype.csv")
+
+# Load phenotype targets
+phenotype = pd.read_csv("rat_body_weight_phenotype.csv")
+# phenotype = pd.read_csv("rat_blood_glucose_phenotype.csv")
+
 
