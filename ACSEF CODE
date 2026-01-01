@@ -1,5 +1,3 @@
-# bw = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_bw.csv")
-# bg = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_blood_glucose.csv")
 # =========================================================
 # Predict genetic strain from phenotype data (NO MERGING)
 # Body weight + Blood glucose → genetic strain
