@@ -1,169 +1,256 @@
-trainmeans_bw.csv")
-# bg = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_blood_glucose.csv")
-# =========================================================
-# Predict genetic strain from phenotype data (NO MERGING)
-# Body weight + Blood glucose → genetic strain
-# =========================================================
-
 import pandas as pd
 import numpy as np
-
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, r2_score
 
-
-# =========================================================
-# STEP 1: Load data
-# =========================================================
+# Load datasets
 print("Loading datasets...")
+parent_coat = pd.read_csv('parental_coat_color_info.txt')
+parent_weight = pd.read_csv('parental_weight_info.txt')
+offspring_coat = pd.read_csv('Offspring_FurColor.txt')
+offspring_weight = pd.read_csv('Offspring_Weight.txt')
 
-bw = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_bw.csv")
-bg = pd.read_csv(r"C:\Users\prani\OneDrive\Documents\Visual Studio 2022\Science Fair\strainmeans_blood_glucose.csv")
+parent_coat["strain"] = parent_coat["strain"].str.strip()
+parent_weight["strain"] = parent_weight["strain"].str.strip()
+offspring_coat["strain"] = offspring_coat["strain"].str.strip()
+offspring_weight["strain"] = offspring_weight["strain"].str.strip()
 
-print("Body weight columns:")
-print(bw.columns.tolist())
+print("Datasets loaded successfully.\n")
 
-print("\nBlood glucose columns:")
-print(bg.columns.tolist())
+# Define F1 mappings
+f1_to_parents = {
+    'B6AF1/J': ('C57BL/6J', 'A/J'),
+    'B6D2F1/J': ('C57BL/6J', 'DBA/2J'),
+    'B6CBAF1/J': ('C57BL/6J', 'CBA/J'),
+    'B6SJLF1/J': ('C57BL/6J', 'SJL/J'),
+    'NZBWF1/J': ('NZB/BlNJ', 'NZW/LacJ'),
+    'B6129PF1/J': ('C57BL/6J', '129P3/J'),
+    'B6C3F1/J': ('C57BL/6J', 'C3H/HeJ'),
+    'CAF1/J': ('BALB/cJ', 'A/J'),
+    'CB6F1/J': ('BALB/cJ', 'C57BL/6J'),
+    'CByB6F1/J': ('CBA/J', 'C57BL/6J'),
+    'B6129SF1/J': ('C57BL/6J', '129S1/SvImJ')
+}
 
+def get_f1_strain(p1, p2):
+    for f1, (parent1, parent2) in f1_to_parents.items():
+        if (p1 == parent1 and p2 == parent2) or (p1 == parent2 and p2 == parent1):
+            return f1
+    return None
 
-# =========================================================
-# STEP 2: Confirm strain column exists
-# =========================================================
-if "strain" not in bw.columns:
-    raise ValueError("ERROR: 'strain' column not found in body weight file.")
+# Create training dataset
+print("Creating training dataset...")
+training_data = []
 
-y = bw["strain"]
-print("\nUsing genetics target: strain")
+for f1_strain in f1_to_parents.keys():
+    p1_strain, p2_strain = f1_to_parents[f1_strain]
+    
+    for sex in ['f', 'm']:
+        off_coat_row = offspring_coat[(offspring_coat['strain'] == f1_strain) & 
+                                       (offspring_coat['sex'] == sex)]
+        off_weight_row = offspring_weight[(offspring_weight['strain'] == f1_strain) & 
+                                           (offspring_weight['sex'] == sex)]
+        
+        if off_coat_row.empty or off_weight_row.empty:
+            continue
+            
+        p1_coat_rows = parent_coat[parent_coat['strain'] == p1_strain]
+        p2_coat_rows = parent_coat[parent_coat['strain'] == p2_strain]
+        p1_weight_row = parent_weight[(parent_weight['strain'] == p1_strain) & 
+                                       (parent_weight['sex'] == sex)]
+        p2_weight_row = parent_weight[(parent_weight['strain'] == p2_strain) & 
+                                       (parent_weight['sex'] == sex)]
+        
+        if p1_coat_rows.empty or p2_coat_rows.empty or p1_weight_row.empty or p2_weight_row.empty:
+            continue
+        
+        training_data.append({
+            'f1_strain': f1_strain,
+            'p1_strain': p1_strain,
+            'p2_strain': p2_strain,
+            'sex': sex,
+            'p1_coat': p1_coat_rows['mean'].mean(),
+            'p2_coat': p2_coat_rows['mean'].mean(),
+            'p1_weight': p1_weight_row['mean'].values[0],
+            'p2_weight': p2_weight_row['mean'].values[0],
+            'offspring_coat': off_coat_row['mean'].values[0],
+            'offspring_weight': off_weight_row['mean'].values[0]
+        })
 
+df = pd.DataFrame(training_data)
+print(f"Training dataset created with {len(df)} samples.\n")
 
-# =========================================================
-# STEP 3: Select numeric phenotype features
-# =========================================================
-print("\nSelecting numeric phenotype features...")
+# Train ML models
+print("Training machine learning models...")
 
-bw = bw.select_dtypes(include=np.number)
-bg = bg.select_dtypes(include=np.number)
+X = df[['p1_coat', 'p2_coat', 'p1_weight', 'p2_weight']]
+X['sex_encoded'] = (df['sex'] == 'f').astype(int)
 
-if bw.empty:
-    raise ValueError("ERROR: No numeric body weight features found.")
+y_coat = df['offspring_coat']
+y_weight = df['offspring_weight']
 
-if bg.empty:
-    raise ValueError("ERROR: No numeric blood glucose features found.")
-
-print("Body weight features:", bw.columns.tolist())
-print("Blood glucose features:", bg.columns.tolist())
-
-
-# =========================
-# STEP 4: Train / test split (aligned indices)
-# =========================
-
-# Use only rows that exist in BOTH datasets
-n = min(len(bw), len(bg), len(y))
-indices = np.arange(n)
-
-X_bw = bw.iloc[:n].reset_index(drop=True)
-X_bg = bg.iloc[:n].reset_index(drop=True)
-y    = y.iloc[:n].reset_index(drop=True)
-
-train_idx, test_idx = train_test_split(
-    indices,
-    test_size=0.2,
-    random_state=42
+X_train, X_test, y_coat_train, y_coat_test = train_test_split(
+    X, y_coat, test_size=0.2, random_state=42
+)
+_, _, y_weight_train, y_weight_test = train_test_split(
+    X, y_weight, test_size=0.2, random_state=42
 )
 
-X_bw_train = X_bw.iloc[train_idx]
-X_bw_test  = X_bw.iloc[test_idx]
+rf_coat = RandomForestRegressor(n_estimators=100, random_state=42)
+rf_coat.fit(X_train, y_coat_train)
 
-X_bg_train = X_bg.iloc[train_idx]
-X_bg_test  = X_bg.iloc[test_idx]
+rf_weight = RandomForestRegressor(n_estimators=100, random_state=42)
+rf_weight.fit(X_train, y_weight_train)
 
-y_train = y.iloc[train_idx]
-y_test  = y.iloc[test_idx]
+y_coat_pred = rf_coat.predict(X_test)
+y_weight_pred = rf_weight.predict(X_test)
 
+coat_mae = mean_absolute_error(y_coat_test, y_coat_pred)
+coat_r2 = r2_score(y_coat_test, y_coat_pred)
+weight_mae = mean_absolute_error(y_weight_test, y_weight_pred)
+weight_r2 = r2_score(y_weight_test, y_weight_pred)
 
-# =========================================================
-# STEP 5: Scale each phenotype separately
-# =========================================================
-print("\nScaling features...")
+print(f"Coat Color Model - MAE: {coat_mae:.3f}, R2: {coat_r2:.3f}")
+print(f"Weight Model - MAE: {weight_mae:.3f}g, R2: {weight_r2:.3f}\n")
 
-scaler_bw = StandardScaler()
-scaler_bg = StandardScaler()
+# Show available strains
+available_strains = sorted(set(parent_coat['strain'].unique()) | set(parent_weight['strain'].unique()))
+print("Available parent strains:")
+print(", ".join(available_strains))
+print("\n")
 
-X_bw_train = scaler_bw.fit_transform(X_bw_train)
-X_bw_test  = scaler_bw.transform(X_bw_test)
+# Get strain phenotype profile
+def get_strain_profile(strain_name, sex):
+    strain_name = strain_name.strip()
+    
+    coat_rows = parent_coat[parent_coat['strain'] == strain_name]
+    weight_row = parent_weight[(parent_weight['strain'] == strain_name) & 
+                                (parent_weight['sex'] == sex)]
+    
+    if coat_rows.empty or weight_row.empty:
+        raise ValueError(f"Strain '{strain_name}' not found in dataset for sex '{sex}'.")
+    
+    return {
+        'coat': coat_rows['mean'].mean(),
+        'weight': weight_row['mean'].values[0],
+        'weight_sd': weight_row['sd'].values[0] if 'sd' in weight_row.columns else 0,
+        'coat_min': coat_rows['minval'].min() if 'minval' in coat_rows.columns else None,
+        'coat_max': coat_rows['maxval'].max() if 'maxval' in coat_rows.columns else None
+    }
 
-X_bg_train = scaler_bg.fit_transform(X_bg_train)
-X_bg_test  = scaler_bg.transform(X_bg_test)
+# Predict offspring phenotype
+def predict_offspring(p1_profile, p2_profile, sex):
+    features = pd.DataFrame({
+        'p1_coat': [p1_profile['coat']],
+        'p2_coat': [p2_profile['coat']],
+        'p1_weight': [p1_profile['weight']],
+        'p2_weight': [p2_profile['weight']],
+        'sex_encoded': [1 if sex == 'f' else 0]
+    })
+    
+    pred_coat = rf_coat.predict(features)[0]
+    pred_weight = rf_weight.predict(features)[0]
+    
+    return {
+        'coat': pred_coat,
+        'weight': pred_weight
+    }
 
+# Describe phenotype
+def describe_profile(name, profile, is_offspring=False, parent_names=None):
+    coat = profile['coat']
+    weight = profile['weight']
+    
+    # Coat color description
+    if coat < 2:
+        coat_desc = "very light coat color (agouti/light brown)"
+    elif coat < 4:
+        coat_desc = "light-medium coat color"
+    elif coat < 6:
+        coat_desc = "medium coat color"
+    else:
+        coat_desc = "dark coat color (black)"
+    
+    # Weight description
+    if weight < 18:
+        weight_desc = "low body weight"
+    elif weight < 25:
+        weight_desc = "moderate body weight"
+    elif weight < 35:
+        weight_desc = "high body weight"
+    else:
+        weight_desc = "very high body weight"
+    
+    if is_offspring and parent_names:
+        return f"Offspring of {parent_names[0]} x {parent_names[1]}: {coat_desc} (value: {coat:.2f}), {weight_desc} ({weight:.2f}g)."
+    else:
+        return f"{name}: {coat_desc} (value: {coat:.2f}), {weight_desc} ({weight:.2f}g)."
 
-# =========================================================
-# STEP 6: Combine ONLY at model input
-# =========================================================
-X_train = np.hstack([X_bw_train, X_bg_train])
-X_test  = np.hstack([X_bw_test, X_bg_test])
+# USER INPUT
+parent1_name = input("Enter first parent strain: ").strip()
+parent2_name = input("Enter second parent strain: ").strip()
+offspring_sex = input("Enter offspring sex (f/m): ").strip().lower()
 
+while offspring_sex not in ['f', 'm']:
+    offspring_sex = input("Invalid input. Enter 'f' for female or 'm' for male: ").strip().lower()
 
-# =========================================================
-# STEP 7: Train Random Forest model
-# =========================================================
-print("\nTraining model...")
+# Generate profiles
+try:
+    p1_profile = get_strain_profile(parent1_name, offspring_sex)
+    p2_profile = get_strain_profile(parent2_name, offspring_sex)
+except ValueError as e:
+    print(f"\nError: {e}")
+    exit()
 
-model = RandomForestClassifier(
-    n_estimators=300,
-    random_state=42,
-    class_weight="balanced"
-)
+offspring_profile = predict_offspring(p1_profile, p2_profile, offspring_sex)
 
-model.fit(X_train, y_train)
+# Get actual offspring data (if available)
+f1_strain = get_f1_strain(parent1_name, parent2_name)
+actual_data = None
 
+if f1_strain:
+    actual_coat_row = offspring_coat[(offspring_coat['strain'] == f1_strain) & 
+                                      (offspring_coat['sex'] == offspring_sex)]
+    actual_weight_row = offspring_weight[(offspring_weight['strain'] == f1_strain) & 
+                                          (offspring_weight['sex'] == offspring_sex)]
+    
+    if not actual_coat_row.empty and not actual_weight_row.empty:
+        actual_data = {
+            'coat': actual_coat_row['mean'].values[0],
+            'weight': actual_weight_row['mean'].values[0]
+        }
 
-# =========================================================
-# STEP 8: Evaluate model
-# =========================================================
-print("\nEvaluating model...")
+# Print results
+print("\n" + "="*70)
+print("PARENT PHENOTYPES")
+print("="*70)
+print(describe_profile(parent1_name, p1_profile))
+print(describe_profile(parent2_name, p2_profile))
 
-y_pred = model.predict(X_test)
+print("\n" + "="*70)
+print("PREDICTED OFFSPRING PHENOTYPE")
+print("="*70)
+print(describe_profile(None, offspring_profile, is_offspring=True, 
+                      parent_names=(parent1_name, parent2_name)))
 
-print("\nAccuracy:", accuracy_score(y_test, y_pred))
-print("\nClassification Report:")
-print(classification_report(y_test, y_pred))
-
-
-# =========================================================
-# STEP 9: Feature importance
-# =========================================================
-feature_names = list(bw.columns) + list(bg.columns)
-
-importances = pd.Series(
-    model.feature_importances_,
-    index=feature_names
-).sort_values(ascending=False)
-
-print("\nTop Feature Importances:")
-print(importances.head(10))
-
-
-# =========================
-# STEP 10: Predict strain for new phenotype data (SAFE)
-# =========================
-
-print("\nPredicting strain for new sample...")
-
-# Create a new sample using dataset feature means
-new_bw = pd.DataFrame([X_bw.mean()], columns=X_bw.columns)
-new_bg = pd.DataFrame([X_bg.mean()], columns=X_bg.columns)
-
-new_bw_scaled = scaler_bw.transform(new_bw)
-new_bg_scaled = scaler_bg.transform(new_bg)
-
-X_new = np.hstack([new_bw_scaled, new_bg_scaled])
-
-prediction = model.predict(X_new)
-
-print("Predicted genetic strain:", prediction[0])
-
-print("\nPIPELINE FINISHED SUCCESSFULLY ✅")
+if actual_data:
+    print("\n" + "="*70)
+    print("ACTUAL OFFSPRING PHENOTYPE (from dataset)")
+    print("="*70)
+    print(f"F1 Strain: {f1_strain}")
+    print(describe_profile(f1_strain, actual_data))
+    
+    print("\n" + "="*70)
+    print("PREDICTION ACCURACY")
+    print("="*70)
+    coat_error = abs(offspring_profile['coat'] - actual_data['coat'])
+    weight_error = abs(offspring_profile['weight'] - actual_data['weight'])
+    coat_pct_error = (coat_error / actual_data['coat'] * 100) if actual_data['coat'] != 0 else 0
+    weight_pct_error = (weight_error / actual_data['weight'] * 100) if actual_data['weight'] != 0 else 0
+    
+    print(f"Coat Color Error: {coat_error:.2f} ({coat_pct_error:.1f}% error)")
+    print(f"Weight Error: {weight_error:.2f}g ({weight_pct_error:.1f}% error)")
+    print("="*70)
+else:
+    print("\nNote: No actual offspring data available in dataset for this cross.")
