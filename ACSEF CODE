@@ -11,10 +11,10 @@ parent_weight = pd.read_csv('parental_weight_info.txt')
 offspring_coat = pd.read_csv('Offspring_FurColor.txt')
 offspring_weight = pd.read_csv('Offspring_Weight.txt')
 
-parent_coat["strain"] = parent_coat["strain"].str.strip()
-parent_weight["strain"] = parent_weight["strain"].str.strip()
-offspring_coat["strain"] = offspring_coat["strain"].str.strip()
-offspring_weight["strain"] = offspring_weight["strain"].str.strip()
+parent_coat['strain'] = parent_coat['strain'].str.strip()
+parent_weight['strain'] = parent_weight['strain'].str.strip()
+offspring_coat['strain'] = offspring_coat['strain'].str.strip()
+offspring_weight['strain'] = offspring_weight['strain'].str.strip()
 
 print("Datasets loaded successfully.\n")
 
@@ -34,7 +34,8 @@ f1_to_parents = {
 }
 
 def get_f1_strain(p1, p2):
-    for f1, (parent1, parent2) in f1_to_parents.items():
+    for f1, parents in f1_to_parents.items():
+        parent1, parent2 = parents
         if (p1 == parent1 and p2 == parent2) or (p1 == parent2 and p2 == parent1):
             return f1
     return None
@@ -47,20 +48,16 @@ for f1_strain in f1_to_parents.keys():
     p1_strain, p2_strain = f1_to_parents[f1_strain]
     
     for sex in ['f', 'm']:
-        off_coat_row = offspring_coat[(offspring_coat['strain'] == f1_strain) & 
-                                       (offspring_coat['sex'] == sex)]
-        off_weight_row = offspring_weight[(offspring_weight['strain'] == f1_strain) & 
-                                           (offspring_weight['sex'] == sex)]
+        off_coat_row = offspring_coat[(offspring_coat['strain'] == f1_strain) & (offspring_coat['sex'] == sex)]
+        off_weight_row = offspring_weight[(offspring_weight['strain'] == f1_strain) & (offspring_weight['sex'] == sex)]
         
         if off_coat_row.empty or off_weight_row.empty:
             continue
             
         p1_coat_rows = parent_coat[parent_coat['strain'] == p1_strain]
         p2_coat_rows = parent_coat[parent_coat['strain'] == p2_strain]
-        p1_weight_row = parent_weight[(parent_weight['strain'] == p1_strain) & 
-                                       (parent_weight['sex'] == sex)]
-        p2_weight_row = parent_weight[(parent_weight['strain'] == p2_strain) & 
-                                       (parent_weight['sex'] == sex)]
+        p1_weight_row = parent_weight[(parent_weight['strain'] == p1_strain) & (parent_weight['sex'] == sex)]
+        p2_weight_row = parent_weight[(parent_weight['strain'] == p2_strain) & (parent_weight['sex'] == sex)]
         
         if p1_coat_rows.empty or p2_coat_rows.empty or p1_weight_row.empty or p2_weight_row.empty:
             continue
@@ -90,12 +87,8 @@ X['sex_encoded'] = (df['sex'] == 'f').astype(int)
 y_coat = df['offspring_coat']
 y_weight = df['offspring_weight']
 
-X_train, X_test, y_coat_train, y_coat_test = train_test_split(
-    X, y_coat, test_size=0.2, random_state=42
-)
-_, _, y_weight_train, y_weight_test = train_test_split(
-    X, y_weight, test_size=0.2, random_state=42
-)
+X_train, X_test, y_coat_train, y_coat_test = train_test_split(X, y_coat, test_size=0.2, random_state=42)
+temp1, temp2, y_weight_train, y_weight_test = train_test_split(X, y_weight, test_size=0.2, random_state=42)
 
 rf_coat = RandomForestRegressor(n_estimators=100, random_state=42)
 rf_coat.fit(X_train, y_coat_train)
@@ -114,29 +107,31 @@ weight_r2 = r2_score(y_weight_test, y_weight_pred)
 print(f"Coat Color Model - MAE: {coat_mae:.3f}, R2: {coat_r2:.3f}")
 print(f"Weight Model - MAE: {weight_mae:.3f}g, R2: {weight_r2:.3f}\n")
 
-# Show available strains
-available_strains = sorted(set(parent_coat['strain'].unique()) | set(parent_weight['strain'].unique()))
-print("Available parent strains:")
-print(", ".join(available_strains))
+# Show available strains from PARENTAL data - split by sex
+male_strains = sorted(set(parent_coat[parent_coat['sex'] == 'm']['strain'].unique()) & set(parent_weight[parent_weight['sex'] == 'm']['strain'].unique()))
+female_strains = sorted(set(parent_coat[parent_coat['sex'] == 'f']['strain'].unique()) & set(parent_weight[parent_weight['sex'] == 'f']['strain'].unique()))
+
+print("Available MALE parent strains (Parent 1):")
+print(", ".join(male_strains))
+print("\n")
+
+print("Available FEMALE parent strains (Parent 2):")
+print(", ".join(female_strains))
 print("\n")
 
 # Get strain phenotype profile
 def get_strain_profile(strain_name, sex):
     strain_name = strain_name.strip()
     
-    coat_rows = parent_coat[parent_coat['strain'] == strain_name]
-    weight_row = parent_weight[(parent_weight['strain'] == strain_name) & 
-                                (parent_weight['sex'] == sex)]
+    coat_rows = parent_coat[(parent_coat['strain'] == strain_name) & (parent_coat['sex'] == sex)]
+    weight_row = parent_weight[(parent_weight['strain'] == strain_name) & (parent_weight['sex'] == sex)]
     
     if coat_rows.empty or weight_row.empty:
         raise ValueError(f"Strain '{strain_name}' not found in dataset for sex '{sex}'.")
     
     return {
         'coat': coat_rows['mean'].mean(),
-        'weight': weight_row['mean'].values[0],
-        'weight_sd': weight_row['sd'].values[0] if 'sd' in weight_row.columns else 0,
-        'coat_min': coat_rows['minval'].min() if 'minval' in coat_rows.columns else None,
-        'coat_max': coat_rows['maxval'].max() if 'maxval' in coat_rows.columns else None
+        'weight': weight_row['mean'].values[0]
     }
 
 # Predict offspring phenotype
@@ -158,11 +153,10 @@ def predict_offspring(p1_profile, p2_profile, sex):
     }
 
 # Describe phenotype
-def describe_profile(name, profile, is_offspring=False, parent_names=None):
+def describe_profile(name, profile, is_offspring=False, parent_names=None, offspring_sex=None):
     coat = profile['coat']
     weight = profile['weight']
     
-    # Coat color description
     if coat < 2:
         coat_desc = "very light coat color (agouti/light brown)"
     elif coat < 4:
@@ -172,7 +166,6 @@ def describe_profile(name, profile, is_offspring=False, parent_names=None):
     else:
         coat_desc = "dark coat color (black)"
     
-    # Weight description
     if weight < 18:
         weight_desc = "low body weight"
     elif weight < 25:
@@ -183,74 +176,102 @@ def describe_profile(name, profile, is_offspring=False, parent_names=None):
         weight_desc = "very high body weight"
     
     if is_offspring and parent_names:
-        return f"Offspring of {parent_names[0]} x {parent_names[1]}: {coat_desc} (value: {coat:.2f}), {weight_desc} ({weight:.2f}g)."
+        sex_label = "Female" if offspring_sex == 'f' else "Male"
+        return f"{sex_label} offspring of {parent_names[0]} x {parent_names[1]}: {coat_desc} (value: {coat:.2f}), {weight_desc} ({weight:.2f}g)."
     else:
         return f"{name}: {coat_desc} (value: {coat:.2f}), {weight_desc} ({weight:.2f}g)."
 
 # USER INPUT
-parent1_name = input("Enter first parent strain: ").strip()
-parent2_name = input("Enter second parent strain: ").strip()
-offspring_sex = input("Enter offspring sex (f/m): ").strip().lower()
+print("=" * 70)
+parent1_name = input("Enter first parent strain (MALE): ").strip()
+parent2_name = input("Enter second parent strain (FEMALE): ").strip()
 
-while offspring_sex not in ['f', 'm']:
-    offspring_sex = input("Invalid input. Enter 'f' for female or 'm' for male: ").strip().lower()
-
-# Generate profiles
+# Generate profiles - Parent 1 is MALE, Parent 2 is FEMALE
 try:
-    p1_profile = get_strain_profile(parent1_name, offspring_sex)
-    p2_profile = get_strain_profile(parent2_name, offspring_sex)
+    p1_profile = get_strain_profile(parent1_name, 'm')
+    p2_profile = get_strain_profile(parent2_name, 'f')
 except ValueError as e:
     print(f"\nError: {e}")
     exit()
 
-offspring_profile = predict_offspring(p1_profile, p2_profile, offspring_sex)
+# Predict for both sexes
+offspring_profile_female = predict_offspring(p1_profile, p2_profile, 'f')
+offspring_profile_male = predict_offspring(p1_profile, p2_profile, 'm')
 
-# Get actual offspring data (if available)
+# Get actual offspring data (if available) for both sexes
 f1_strain = get_f1_strain(parent1_name, parent2_name)
-actual_data = None
+actual_data_female = None
+actual_data_male = None
 
 if f1_strain:
-    actual_coat_row = offspring_coat[(offspring_coat['strain'] == f1_strain) & 
-                                      (offspring_coat['sex'] == offspring_sex)]
-    actual_weight_row = offspring_weight[(offspring_weight['strain'] == f1_strain) & 
-                                          (offspring_weight['sex'] == offspring_sex)]
+    actual_coat_row_f = offspring_coat[(offspring_coat['strain'] == f1_strain) & (offspring_coat['sex'] == 'f')]
+    actual_weight_row_f = offspring_weight[(offspring_weight['strain'] == f1_strain) & (offspring_weight['sex'] == 'f')]
     
-    if not actual_coat_row.empty and not actual_weight_row.empty:
-        actual_data = {
-            'coat': actual_coat_row['mean'].values[0],
-            'weight': actual_weight_row['mean'].values[0]
+    if not actual_coat_row_f.empty and not actual_weight_row_f.empty:
+        actual_data_female = {
+            'coat': actual_coat_row_f['mean'].values[0],
+            'weight': actual_weight_row_f['mean'].values[0]
+        }
+    
+    actual_coat_row_m = offspring_coat[(offspring_coat['strain'] == f1_strain) & (offspring_coat['sex'] == 'm')]
+    actual_weight_row_m = offspring_weight[(offspring_weight['strain'] == f1_strain) & (offspring_weight['sex'] == 'm')]
+    
+    if not actual_coat_row_m.empty and not actual_weight_row_m.empty:
+        actual_data_male = {
+            'coat': actual_coat_row_m['mean'].values[0],
+            'weight': actual_weight_row_m['mean'].values[0]
         }
 
 # Print results
 print("\n" + "="*70)
 print("PARENT PHENOTYPES")
 print("="*70)
-print(describe_profile(parent1_name, p1_profile))
-print(describe_profile(parent2_name, p2_profile))
+print(describe_profile(f"{parent1_name} (Male)", p1_profile))
+print(describe_profile(f"{parent2_name} (Female)", p2_profile))
 
 print("\n" + "="*70)
-print("PREDICTED OFFSPRING PHENOTYPE")
+print("PREDICTED OFFSPRING PHENOTYPES")
 print("="*70)
-print(describe_profile(None, offspring_profile, is_offspring=True, 
-                      parent_names=(parent1_name, parent2_name)))
+print(describe_profile(None, offspring_profile_female, is_offspring=True, parent_names=(parent1_name, parent2_name), offspring_sex='f'))
+print(describe_profile(None, offspring_profile_male, is_offspring=True, parent_names=(parent1_name, parent2_name), offspring_sex='m'))
 
-if actual_data:
+if actual_data_female or actual_data_male:
     print("\n" + "="*70)
-    print("ACTUAL OFFSPRING PHENOTYPE (from dataset)")
+    print("ACTUAL OFFSPRING PHENOTYPES (from dataset)")
     print("="*70)
     print(f"F1 Strain: {f1_strain}")
-    print(describe_profile(f1_strain, actual_data))
+    print()
+    
+    if actual_data_female:
+        print(describe_profile("Female offspring", actual_data_female))
+    
+    if actual_data_male:
+        print(describe_profile("Male offspring", actual_data_male))
     
     print("\n" + "="*70)
     print("PREDICTION ACCURACY")
     print("="*70)
-    coat_error = abs(offspring_profile['coat'] - actual_data['coat'])
-    weight_error = abs(offspring_profile['weight'] - actual_data['weight'])
-    coat_pct_error = (coat_error / actual_data['coat'] * 100) if actual_data['coat'] != 0 else 0
-    weight_pct_error = (weight_error / actual_data['weight'] * 100) if actual_data['weight'] != 0 else 0
     
-    print(f"Coat Color Error: {coat_error:.2f} ({coat_pct_error:.1f}% error)")
-    print(f"Weight Error: {weight_error:.2f}g ({weight_pct_error:.1f}% error)")
+    if actual_data_female:
+        coat_error_f = abs(offspring_profile_female['coat'] - actual_data_female['coat'])
+        weight_error_f = abs(offspring_profile_female['weight'] - actual_data_female['weight'])
+        coat_pct_error_f = (coat_error_f / actual_data_female['coat'] * 100) if actual_data_female['coat'] != 0 else 0
+        weight_pct_error_f = (weight_error_f / actual_data_female['weight'] * 100) if actual_data_female['weight'] != 0 else 0
+        
+        print("\nFemale Offspring:")
+        print(f"  Coat Color Error: {coat_error_f:.2f} ({coat_pct_error_f:.1f}% error)")
+        print(f"  Weight Error: {weight_error_f:.2f}g ({weight_pct_error_f:.1f}% error)")
+    
+    if actual_data_male:
+        coat_error_m = abs(offspring_profile_male['coat'] - actual_data_male['coat'])
+        weight_error_m = abs(offspring_profile_male['weight'] - actual_data_male['weight'])
+        coat_pct_error_m = (coat_error_m / actual_data_male['coat'] * 100) if actual_data_male['coat'] != 0 else 0
+        weight_pct_error_m = (weight_error_m / actual_data_male['weight'] * 100) if actual_data_male['weight'] != 0 else 0
+        
+        print("\nMale Offspring:")
+        print(f"  Coat Color Error: {coat_error_m:.2f} ({coat_pct_error_m:.1f}% error)")
+        print(f"  Weight Error: {weight_error_m:.2f}g ({weight_pct_error_m:.1f}% error)")
+    
     print("="*70)
 else:
     print("\nNote: No actual offspring data available in dataset for this cross.")
